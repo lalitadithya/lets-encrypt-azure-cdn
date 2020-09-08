@@ -5,9 +5,9 @@ using Microsoft.Extensions.Logging;
 
 namespace LetsEncryptAzureCdn
 {
-    public static class Function1
+    public static class ApplyOrRenewCertificate
     {
-        [FunctionName("Function1")]
+        [FunctionName("ApplyOrRenewCertificate")]
         public static void Run([TimerTrigger("0 */5 * * * *")]TimerInfo myTimer, ILogger log)
         {
             log.LogInformation($"C# Timer trigger function executed at: {DateTime.Now}");
