@@ -88,7 +88,11 @@ namespace LetsEncryptAzureCdn
                 var certPem = cert.ToPem();
 
                 var pfxBuilder = cert.ToPfx(privateKey);
-                var pfx = pfxBuilder.Build(domainName, "abcd1234");
+                string password = "abcd1234";
+                var pfx = pfxBuilder.Build(domainName, password);
+
+                var certificateHelper = new KeyVaultCertificateHelper(Environment.GetEnvironmentVariable("KeyVaultName"));
+                await certificateHelper.ImportCertificate(domainName.Replace(".", ""), pfx, password);
             }
         }
     }
