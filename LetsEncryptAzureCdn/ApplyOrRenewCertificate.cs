@@ -35,10 +35,19 @@ namespace LetsEncryptAzureCdn
             var order = await acmeContext.NewOrder(domainNames);
             var authorizations = await order.Authorizations();
 
+            int i = 0;
             foreach (var authorization in authorizations)
             {
+                var domainName = domainNames[i];
+                if (domainName.StartsWith("*"))
+                {
+                    domainName = domainName.Substring(1);
+                }
+
                 var dnsChallenge = await authorization.Dns();
-                var text = acmeContext.AccountKey.DnsTxt(dnsChallenge.KeyAuthz);
+                var dnsText = acmeContext.AccountKey.DnsTxt(dnsChallenge.KeyAuthz);
+                var dnsName = "_acme-challenge" + domainName;
+
             }
         }
     }
