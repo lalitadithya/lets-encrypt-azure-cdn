@@ -74,8 +74,22 @@ namespace LetsEncryptAzureCdn
                     log.LogError("Unable to validate challenge - {0} - {1}", challengeResult.Error.Detail, string.Join('~', challengeResult.Error.Subproblems.Select(x => x.Detail)));
                     return;
                 }
-            }
 
+                var privateKey = KeyFactory.NewKey(KeyAlgorithm.ES256);
+                var cert = await order.Generate(new CsrInfo
+                {
+                    CountryName = Environment.GetEnvironmentVariable("CountryName"),
+                    State = Environment.GetEnvironmentVariable("State"),
+                    Locality = Environment.GetEnvironmentVariable("Locality"),
+                    Organization = Environment.GetEnvironmentVariable("Organization"),
+                    OrganizationUnit = Environment.GetEnvironmentVariable("OrganizationUnit"),
+                    CommonName = domainName,
+                }, privateKey);
+                var certPem = cert.ToPem();
+
+                var pfxBuilder = cert.ToPfx(privateKey);
+                var pfx = pfxBuilder.Build(domainName, "abcd1234");
+            }
         }
     }
 }
