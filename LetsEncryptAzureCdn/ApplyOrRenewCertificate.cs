@@ -1,10 +1,16 @@
 using System;
+using System.Threading;
 using System.Threading.Tasks;
+using Azure.Identity;
 using Certes;
 using Certes.Acme;
 using LetsEncryptAzureCdn.Helpers;
+using Microsoft.Azure.Management.Dns;
+using Microsoft.Azure.Management.Dns.Models;
+using Microsoft.Azure.Services.AppAuthentication;
 using Microsoft.Azure.WebJobs;
 using Microsoft.Extensions.Logging;
+using Microsoft.Rest;
 
 namespace LetsEncryptAzureCdn
 {
@@ -35,6 +41,10 @@ namespace LetsEncryptAzureCdn
             var order = await acmeContext.NewOrder(domainNames);
             var authorizations = await order.Authorizations();
 
+            var dnsHelper = new DnsHelper(Environment.GetEnvironmentVariable("SubscriptionId"));
+            string resourceGroupName = Environment.GetEnvironmentVariable("DnsZoneResourceGroup");
+            string dnsZoneName = Environment.GetEnvironmentVariable("DnsZoneName");
+
             int i = 0;
             foreach (var authorization in authorizations)
             {
@@ -46,9 +56,17 @@ namespace LetsEncryptAzureCdn
 
                 var dnsChallenge = await authorization.Dns();
                 var dnsText = acmeContext.AccountKey.DnsTxt(dnsChallenge.KeyAuthz);
-                var dnsName = "_acme-challenge" + domainName;
+                var dnsName = ("_acme-challenge." + domainName).Replace("."+dnsZoneName, "").Trim();
+
+                var txtRecords = await dnsHelper.FetchTxtRecordsAsync(resourceGroupName, dnsZoneName, dnsName);
+
+                if(txtRecords != null && !txtRecords.Contains(dnsText))
+                {
+
+                }
 
             }
+
         }
     }
 }
