@@ -60,9 +60,9 @@ namespace LetsEncryptAzureCdn
 
                 var txtRecords = await dnsHelper.FetchTxtRecordsAsync(resourceGroupName, dnsZoneName, dnsName);
 
-                if(txtRecords != null && !txtRecords.Contains(dnsText))
+                if(txtRecords == null || !txtRecords.Contains(dnsText))
                 {
-
+                    await dnsHelper.CreateTxtRecord(resourceGroupName, dnsZoneName, dnsName, dnsText);
                 }
 
             }

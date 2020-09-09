@@ -52,5 +52,20 @@ namespace LetsEncryptAzureCdn.Helpers
                 }
             }
         }
+
+        public async Task CreateTxtRecord(string resourceGroupName, string dnsZoneName, string recordName, string recordValue)
+        {
+            await dnsManagementClient.RecordSets.CreateOrUpdateAsync(resourceGroupName, dnsZoneName, recordName, RecordType.TXT, new RecordSet
+            {
+                TxtRecords = new List<TxtRecord>()
+                    {
+                        new TxtRecord()
+                        {
+                            Value = new List<string> { recordValue }
+                        }
+                    },
+                TTL = 3600
+            });
+        }
     }
 }
