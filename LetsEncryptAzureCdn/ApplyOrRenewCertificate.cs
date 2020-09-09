@@ -31,6 +31,15 @@ namespace LetsEncryptAzureCdn
                 acmeContext = new AcmeContext(WellKnownServers.LetsEncryptStagingV2, KeyFactory.FromPem(acmeAccountPem));
             }
 
+            var domainNames = Environment.GetEnvironmentVariable("DomainName").Split(',');
+            var order = await acmeContext.NewOrder(domainNames);
+            var authorizations = await order.Authorizations();
+
+            foreach (var authorization in authorizations)
+            {
+                var dnsChallenge = await authorization.Dns();
+                var text = acmeContext.AccountKey.DnsTxt(dnsChallenge.KeyAuthz);
+            }
         }
     }
 }
