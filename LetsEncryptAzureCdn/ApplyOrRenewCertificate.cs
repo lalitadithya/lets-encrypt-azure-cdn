@@ -1,16 +1,11 @@
 using System;
-using System.Threading;
+using System.Linq;
 using System.Threading.Tasks;
-using Azure.Identity;
 using Certes;
 using Certes.Acme;
 using LetsEncryptAzureCdn.Helpers;
-using Microsoft.Azure.Management.Dns;
-using Microsoft.Azure.Management.Dns.Models;
-using Microsoft.Azure.Services.AppAuthentication;
 using Microsoft.Azure.WebJobs;
 using Microsoft.Extensions.Logging;
-using Microsoft.Rest;
 
 namespace LetsEncryptAzureCdn
 {
@@ -55,16 +50,30 @@ namespace LetsEncryptAzureCdn
                 }
 
                 var dnsChallenge = await authorization.Dns();
-                var dnsText = acmeContext.AccountKey.DnsTxt(dnsChallenge.KeyAuthz);
-                var dnsName = ("_acme-challenge." + domainName).Replace("."+dnsZoneName, "").Trim();
+                var dnsText = acmeContext.AccountKey.DnsTxt(dnsChallenge.Token);
+                var dnsName = ("_acme-challenge." + domainName).Replace("." + dnsZoneName, "").Trim();
 
                 var txtRecords = await dnsHelper.FetchTxtRecordsAsync(resourceGroupName, dnsZoneName, dnsName);
 
-                if(txtRecords == null || !txtRecords.Contains(dnsText))
+                if (txtRecords == null || !txtRecords.Contains(dnsText))
                 {
                     await dnsHelper.CreateTxtRecord(resourceGroupName, dnsZoneName, dnsName, dnsText);
                 }
 
+                await Task.Delay(60 * 1000);
+
+                var challengeResult = await dnsChallenge.Validate();
+                while (challengeResult.Status.HasValue && challengeResult.Status.Value == Certes.Acme.Resource.ChallengeStatus.Pending)
+                {
+                    await Task.Delay(1 * 1000);
+                    challengeResult = await dnsChallenge.Resource();
+                }
+
+                if (!challengeResult.Status.HasValue || challengeResult.Status.Value != Certes.Acme.Resource.ChallengeStatus.Valid)
+                {
+                    log.LogError("Unable to validate challenge - {0} - {1}", challengeResult.Error.Detail, string.Join('~', challengeResult.Error.Subproblems.Select(x => x.Detail)));
+                    return;
+                }
             }
 
         }
