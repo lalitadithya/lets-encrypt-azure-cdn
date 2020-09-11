@@ -5,21 +5,24 @@ using System.Threading.Tasks;
 using Certes;
 using Certes.Acme;
 using LetsEncryptAzureCdn.Helpers;
-using Microsoft.Azure.Management.Cdn;
-using Microsoft.Azure.Management.Cdn.Models;
-using Microsoft.Azure.Services.AppAuthentication;
 using Microsoft.Azure.WebJobs;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
-using Microsoft.Rest;
 
 namespace LetsEncryptAzureCdn
 {
     public static class ApplyOrRenewCertificate
     {
         [FunctionName("ApplyOrRenewCertificate")]
-        public static async Task Run([TimerTrigger("0 */5 * * * *")] TimerInfo myTimer, ILogger log)
+        public static async Task Run([TimerTrigger("0 */5 * * * *")] TimerInfo myTimer, ILogger log, ExecutionContext executionContext)
         {
             log.LogInformation($"C# Timer trigger function executed at: {DateTime.Now}");
+
+            var config = new ConfigurationBuilder()
+                                .SetBasePath(executionContext.FunctionAppDirectory)
+                                .AddJsonFile("local.settings.json", optional: true, reloadOnChange: true)
+                                .AddEnvironmentVariables()
+                                .Build();
 
             AcmeContext acmeContext;
 
