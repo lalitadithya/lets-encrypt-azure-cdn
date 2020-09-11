@@ -5,6 +5,7 @@ using System.Threading.Tasks;
 using Certes;
 using Certes.Acme;
 using LetsEncryptAzureCdn.Helpers;
+using LetsEncryptAzureCdn.Models;
 using Microsoft.Azure.WebJobs;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
@@ -24,30 +25,30 @@ namespace LetsEncryptAzureCdn
                                 .AddEnvironmentVariables()
                                 .Build();
 
-            AcmeContext acmeContext;
+            var certificateDetails = new List<CertificateRenewalInputModel>();
+            config.GetSection("CertificateDetails").Bind(certificateDetails);
 
-            var secretHelper = new KeyVaultSecretHelper(Environment.GetEnvironmentVariable("KeyVaultName"));
-            var acmeAccountPem = await secretHelper.GetSecretAsync("AcmeAccountKeyPem");
-            if (string.IsNullOrWhiteSpace(acmeAccountPem))
+            foreach (var certifcate in certificateDetails)
             {
-                acmeContext = new AcmeContext(WellKnownServers.LetsEncryptV2);
-                await acmeContext.NewAccount(Environment.GetEnvironmentVariable("AcmeAccountEmail"), true);
-                var pem = acmeContext.AccountKey.ToPem();
-                await secretHelper.SetSecretAsync("AcmeAccountKeyPem", pem);
-            }
-            else
-            {
-                acmeContext = new AcmeContext(WellKnownServers.LetsEncryptV2, KeyFactory.FromPem(acmeAccountPem));
-            }
+                AcmeContext acmeContext;
 
-            string keyVaultName = Environment.GetEnvironmentVariable("KeyVaultName");
-            var certificateHelper = new KeyVaultCertificateHelper(keyVaultName);
+                var secretHelper = new KeyVaultSecretHelper(certifcate.KeyVaultName);
+                var acmeAccountPem = await secretHelper.GetSecretAsync("AcmeAccountKeyPem");
+                if (string.IsNullOrWhiteSpace(acmeAccountPem))
+                {
+                    acmeContext = new AcmeContext(WellKnownServers.LetsEncryptV2);
+                    await acmeContext.NewAccount(Environment.GetEnvironmentVariable("AcmeAccountEmail"), true);
+                    var pem = acmeContext.AccountKey.ToPem();
+                    await secretHelper.SetSecretAsync("AcmeAccountKeyPem", pem);
+                }
+                else
+                {
+                    acmeContext = new AcmeContext(WellKnownServers.LetsEncryptV2, KeyFactory.FromPem(acmeAccountPem));
+                }
 
-            var domainNames = Environment.GetEnvironmentVariable("DomainName").Split(',');
-            List<string> domainNameCertificateToRenew = new List<string>();
-            for (int j = 0; j < domainNames.Length; j++)
-            {
-                string domainName = domainNames[j];
+                var certificateHelper = new KeyVaultCertificateHelper(certifcate.KeyVaultName);
+
+                string domainName = certifcate.DomainName;
                 if (domainName.StartsWith("*"))
                 {
                     domainName = domainName.Substring(1);
@@ -55,51 +56,28 @@ namespace LetsEncryptAzureCdn
 
                 string keyVaultCertificateName = domainName.Replace(".", "");
                 var certificateExpiry = await certificateHelper.GetCertificateExpiryAsync(keyVaultCertificateName);
-                if ((certificateExpiry.HasValue && certificateExpiry.Value.Subtract(DateTime.UtcNow).TotalDays <= 7) || !certificateExpiry.HasValue)
+                if (certificateExpiry.HasValue && certificateExpiry.Value.Subtract(DateTime.UtcNow).TotalDays > 7)
                 {
-                    domainNameCertificateToRenew.Add(domainNames[j]);
-                }
-            }
-
-            if (!domainNameCertificateToRenew.Any())
-            {
-                log.LogInformation("No certificates to renew.");
-                return;
-            }
-
-            domainNames = domainNameCertificateToRenew.ToArray();
-
-            var order = await acmeContext.NewOrder(domainNames);
-            var authorizations = await order.Authorizations();
-
-            string subscriptionId = Environment.GetEnvironmentVariable("SubscriptionId");
-            string resourceGroupName = Environment.GetEnvironmentVariable("DnsZoneResourceGroup");
-            string dnsZoneName = Environment.GetEnvironmentVariable("DnsZoneName");
-
-            var dnsHelper = new DnsHelper(subscriptionId);
-            var cdnHelper = new CdnHelper(subscriptionId);
-
-            int i = 0;
-            foreach (var authorization in authorizations)
-            {
-                var domainName = domainNames[i];
-                if (domainName.StartsWith("*"))
-                {
-                    domainName = domainName.Substring(1);
+                    log.LogInformation("No certificates to renew.");
+                    continue;
                 }
 
-                string keyVaultCertificateName = domainName.Replace(".", "");
+                var order = await acmeContext.NewOrder(new string[] { certifcate.DomainName });
+                var authorization = (await order.Authorizations()).First();
 
+                string subscriptionId = Environment.GetEnvironmentVariable("SubscriptionId");
+
+                var dnsHelper = new DnsHelper(subscriptionId);
 
                 var dnsChallenge = await authorization.Dns();
                 var dnsText = acmeContext.AccountKey.DnsTxt(dnsChallenge.Token);
-                var dnsName = ("_acme-challenge." + domainName).Replace("." + dnsZoneName, "").Trim();
+                var dnsName = ("_acme-challenge." + domainName).Replace("." + certifcate.DnsZoneName, "").Trim();
 
-                var txtRecords = await dnsHelper.FetchTxtRecordsAsync(resourceGroupName, dnsZoneName, dnsName);
+                var txtRecords = await dnsHelper.FetchTxtRecordsAsync(certifcate.DnsZoneResourceGroup, certifcate.DnsZoneName, dnsName);
 
                 if (txtRecords == null || !txtRecords.Contains(dnsText))
                 {
-                    await dnsHelper.CreateTxtRecord(resourceGroupName, dnsZoneName, dnsName, dnsText);
+                    await dnsHelper.CreateTxtRecord(certifcate.DnsZoneResourceGroup, certifcate.DnsZoneName, dnsName, dnsText);
                 }
 
                 await Task.Delay(60 * 1000);
@@ -120,12 +98,12 @@ namespace LetsEncryptAzureCdn
                 var privateKey = KeyFactory.NewKey(KeyAlgorithm.RS256);
                 var cert = await order.Generate(new CsrInfo
                 {
-                    CountryName = Environment.GetEnvironmentVariable("CountryName"),
-                    State = Environment.GetEnvironmentVariable("State"),
-                    Locality = Environment.GetEnvironmentVariable("Locality"),
-                    Organization = Environment.GetEnvironmentVariable("Organization"),
-                    OrganizationUnit = Environment.GetEnvironmentVariable("OrganizationUnit"),
-                    CommonName = domainName,
+                    CountryName = certifcate.CertificateCountryName,
+                    State = certifcate.CertificateState,
+                    Locality = certifcate.CertificateLocality,
+                    Organization = certifcate.CertificateOrganization,
+                    OrganizationUnit = certifcate.CertificateOrganizationUnit,
+                    CommonName = certifcate.DomainName,
                 }, privateKey);
                 var certPem = cert.ToPem();
 
@@ -135,9 +113,10 @@ namespace LetsEncryptAzureCdn
 
                 (string certificateName, string certificateVerison) = await certificateHelper.ImportCertificate(keyVaultCertificateName, pfx, password);
 
-                await cdnHelper.EnableHttpsForCustomDomain(Environment.GetEnvironmentVariable("CdnResourceGroup"), Environment.GetEnvironmentVariable("CdnProfileName"),
-                    Environment.GetEnvironmentVariable("CdnEndpointName"), Environment.GetEnvironmentVariable("CdnCustomDomainName"),
-                    certificateName, certificateVerison, keyVaultName);
+                var cdnHelper = new CdnHelper(subscriptionId);
+
+                await cdnHelper.EnableHttpsForCustomDomain(certifcate.CdnResourceGroup, certifcate.CdnProfileName,
+                    certifcate.CdnEndpointName, certifcate.CdnCustomDomainName, certificateName, certificateVerison, certifcate.KeyVaultName);
             }
         }
     }
