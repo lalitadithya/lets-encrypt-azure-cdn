@@ -80,7 +80,7 @@ namespace LetsEncryptAzureCdn
                     return;
                 }
 
-                var privateKey = KeyFactory.NewKey(KeyAlgorithm.ES256);
+                var privateKey = KeyFactory.NewKey(KeyAlgorithm.RS256);
                 var cert = await order.Generate(new CsrInfo
                 {
                     CountryName = Environment.GetEnvironmentVariable("CountryName"),
@@ -108,19 +108,27 @@ namespace LetsEncryptAzureCdn
                     SubscriptionId = subscriptionId
                 };
 
-                cdnManagementClient.CustomDomains.EnableCustomHttps(resourceGroupName, Environment.GetEnvironmentVariable("CdnProfileName"),
-                    Environment.GetEnvironmentVariable("CdnEndpointName"), Environment.GetEnvironmentVariable("CdnCustomDomainName"), new UserManagedHttpsParameters
+                try
                 {
-                    CertificateSourceParameters = new KeyVaultCertificateSourceParameters
-                    {
-                        SecretName = certificateName, 
-                        SecretVersion = certificateVerison,
-                        ResourceGroupName = resourceGroupName,
-                        SubscriptionId = subscriptionId,
-                        VaultName = keyVaultName
-                    },
-                    MinimumTlsVersion = MinimumTlsVersion.TLS12
-                });
+                    cdnManagementClient.CustomDomains.EnableCustomHttps(Environment.GetEnvironmentVariable("CdnResourceGroup"), Environment.GetEnvironmentVariable("CdnProfileName"),
+                        Environment.GetEnvironmentVariable("CdnEndpointName"), Environment.GetEnvironmentVariable("CdnCustomDomainName"), new UserManagedHttpsParameters
+                        {
+                            CertificateSourceParameters = new KeyVaultCertificateSourceParameters
+                            {
+                                SecretName = certificateName,
+                                SecretVersion = certificateVerison,
+                                ResourceGroupName = resourceGroupName,
+                                SubscriptionId = subscriptionId,
+                                VaultName = keyVaultName
+                            },
+                            MinimumTlsVersion = MinimumTlsVersion.TLS12,
+                            ProtocolType = "ServerNameIndication"
+                        });
+                }
+                catch (Exception e)
+                {
+
+                }
             }
         }
     }
