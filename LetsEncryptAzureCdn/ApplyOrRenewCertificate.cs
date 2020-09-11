@@ -41,9 +41,11 @@ namespace LetsEncryptAzureCdn
             var authorizations = await order.Authorizations();
 
             string subscriptionId = Environment.GetEnvironmentVariable("SubscriptionId");
-            var dnsHelper = new DnsHelper(subscriptionId);
             string resourceGroupName = Environment.GetEnvironmentVariable("DnsZoneResourceGroup");
             string dnsZoneName = Environment.GetEnvironmentVariable("DnsZoneName");
+
+            var dnsHelper = new DnsHelper(subscriptionId);
+            var cdnHelper = new CdnHelper(subscriptionId);
 
             int i = 0;
             foreach (var authorization in authorizations)
@@ -100,35 +102,9 @@ namespace LetsEncryptAzureCdn
                 var certificateHelper = new KeyVaultCertificateHelper(keyVaultName);
                 (string certificateName, string certificateVerison) = await certificateHelper.ImportCertificate(domainName.Replace(".", ""), pfx, password);
 
-
-                var azureServiceTokenProvider = new AzureServiceTokenProvider();
-                var token = azureServiceTokenProvider.GetAccessTokenAsync("https://management.azure.com/").GetAwaiter().GetResult();
-                var cdnManagementClient = new CdnManagementClient(new TokenCredentials(token))
-                {
-                    SubscriptionId = subscriptionId
-                };
-
-                try
-                {
-                    cdnManagementClient.CustomDomains.EnableCustomHttps(Environment.GetEnvironmentVariable("CdnResourceGroup"), Environment.GetEnvironmentVariable("CdnProfileName"),
-                        Environment.GetEnvironmentVariable("CdnEndpointName"), Environment.GetEnvironmentVariable("CdnCustomDomainName"), new UserManagedHttpsParameters
-                        {
-                            CertificateSourceParameters = new KeyVaultCertificateSourceParameters
-                            {
-                                SecretName = certificateName,
-                                SecretVersion = certificateVerison,
-                                ResourceGroupName = resourceGroupName,
-                                SubscriptionId = subscriptionId,
-                                VaultName = keyVaultName
-                            },
-                            MinimumTlsVersion = MinimumTlsVersion.TLS12,
-                            ProtocolType = "ServerNameIndication"
-                        });
-                }
-                catch (Exception e)
-                {
-
-                }
+                await cdnHelper.EnableHttpsForCustomDomain(Environment.GetEnvironmentVariable("CdnResourceGroup"), Environment.GetEnvironmentVariable("CdnProfileName"),
+                    Environment.GetEnvironmentVariable("CdnEndpointName"), Environment.GetEnvironmentVariable("CdnCustomDomainName"),
+                    certificateName, certificateVerison, keyVaultName);
             }
         }
     }
