@@ -4,8 +4,12 @@ using System.Threading.Tasks;
 using Certes;
 using Certes.Acme;
 using LetsEncryptAzureCdn.Helpers;
+using Microsoft.Azure.Management.Cdn;
+using Microsoft.Azure.Management.Cdn.Models;
+using Microsoft.Azure.Services.AppAuthentication;
 using Microsoft.Azure.WebJobs;
 using Microsoft.Extensions.Logging;
+using Microsoft.Rest;
 
 namespace LetsEncryptAzureCdn
 {
@@ -36,7 +40,8 @@ namespace LetsEncryptAzureCdn
             var order = await acmeContext.NewOrder(domainNames);
             var authorizations = await order.Authorizations();
 
-            var dnsHelper = new DnsHelper(Environment.GetEnvironmentVariable("SubscriptionId"));
+            string subscriptionId = Environment.GetEnvironmentVariable("SubscriptionId");
+            var dnsHelper = new DnsHelper(subscriptionId);
             string resourceGroupName = Environment.GetEnvironmentVariable("DnsZoneResourceGroup");
             string dnsZoneName = Environment.GetEnvironmentVariable("DnsZoneName");
 
@@ -91,8 +96,31 @@ namespace LetsEncryptAzureCdn
                 string password = "abcd1234";
                 var pfx = pfxBuilder.Build(domainName, password);
 
-                var certificateHelper = new KeyVaultCertificateHelper(Environment.GetEnvironmentVariable("KeyVaultName"));
-                await certificateHelper.ImportCertificate(domainName.Replace(".", ""), pfx, password);
+                string keyVaultName = Environment.GetEnvironmentVariable("KeyVaultName");
+                var certificateHelper = new KeyVaultCertificateHelper(keyVaultName);
+                (string certificateName, string certificateVerison) = await certificateHelper.ImportCertificate(domainName.Replace(".", ""), pfx, password);
+
+
+                var azureServiceTokenProvider = new AzureServiceTokenProvider();
+                var token = azureServiceTokenProvider.GetAccessTokenAsync("https://management.azure.com/").GetAwaiter().GetResult();
+                var cdnManagementClient = new CdnManagementClient(new TokenCredentials(token))
+                {
+                    SubscriptionId = subscriptionId
+                };
+
+                cdnManagementClient.CustomDomains.EnableCustomHttps(resourceGroupName, Environment.GetEnvironmentVariable("CdnProfileName"),
+                    Environment.GetEnvironmentVariable("CdnEndpointName"), Environment.GetEnvironmentVariable("CdnCustomDomainName"), new UserManagedHttpsParameters
+                {
+                    CertificateSourceParameters = new KeyVaultCertificateSourceParameters
+                    {
+                        SecretName = certificateName, 
+                        SecretVersion = certificateVerison,
+                        ResourceGroupName = resourceGroupName,
+                        SubscriptionId = subscriptionId,
+                        VaultName = keyVaultName
+                    },
+                    MinimumTlsVersion = MinimumTlsVersion.TLS12
+                });
             }
         }
     }

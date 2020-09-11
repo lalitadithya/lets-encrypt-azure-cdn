@@ -18,12 +18,14 @@ namespace LetsEncryptAzureCdn.Helpers
             certificateClient = new CertificateClient(new Uri(keyVaultUri), new VisualStudioCredential());
         }
 
-        public async Task ImportCertificate(string certificateName, byte[] certificate, string password)
+        public async Task<(string, string)> ImportCertificate(string certificateName, byte[] certificate, string password)
         {
-            await certificateClient.ImportCertificateAsync(new ImportCertificateOptions(certificateName, certificate)
+            var result = await certificateClient.ImportCertificateAsync(new ImportCertificateOptions(certificateName, certificate)
             {
                 Password = password
             });
+
+            return (result.Value.Properties.Name, result.Value.Properties.Version);
         }
     }
 }
