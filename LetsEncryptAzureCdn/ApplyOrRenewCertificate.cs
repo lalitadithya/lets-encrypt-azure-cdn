@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
 using Certes;
@@ -36,7 +37,35 @@ namespace LetsEncryptAzureCdn
                 acmeContext = new AcmeContext(WellKnownServers.LetsEncryptV2, KeyFactory.FromPem(acmeAccountPem));
             }
 
+            string keyVaultName = Environment.GetEnvironmentVariable("KeyVaultName");
+            var certificateHelper = new KeyVaultCertificateHelper(keyVaultName);
+
             var domainNames = Environment.GetEnvironmentVariable("DomainName").Split(',');
+            List<string> domainNameCertificateToRenew = new List<string>();
+            for (int j = 0; j < domainNames.Length; j++)
+            {
+                string domainName = domainNames[j];
+                if (domainName.StartsWith("*"))
+                {
+                    domainName = domainName.Substring(1);
+                }
+
+                string keyVaultCertificateName = domainName.Replace(".", "");
+                var certificateExpiry = await certificateHelper.GetCertificateExpiryAsync(keyVaultCertificateName);
+                if ((certificateExpiry.HasValue && certificateExpiry.Value.Subtract(DateTime.UtcNow).TotalDays <= 7) || !certificateExpiry.HasValue)
+                {
+                    domainNameCertificateToRenew.Add(domainNames[j]);
+                }
+            }
+
+            if (!domainNameCertificateToRenew.Any())
+            {
+                log.LogInformation("No certificates to renew.");
+                return;
+            }
+
+            domainNames = domainNameCertificateToRenew.ToArray();
+
             var order = await acmeContext.NewOrder(domainNames);
             var authorizations = await order.Authorizations();
 
@@ -55,6 +84,9 @@ namespace LetsEncryptAzureCdn
                 {
                     domainName = domainName.Substring(1);
                 }
+
+                string keyVaultCertificateName = domainName.Replace(".", "");
+
 
                 var dnsChallenge = await authorization.Dns();
                 var dnsText = acmeContext.AccountKey.DnsTxt(dnsChallenge.Token);
@@ -98,9 +130,7 @@ namespace LetsEncryptAzureCdn
                 string password = "abcd1234";
                 var pfx = pfxBuilder.Build(domainName, password);
 
-                string keyVaultName = Environment.GetEnvironmentVariable("KeyVaultName");
-                var certificateHelper = new KeyVaultCertificateHelper(keyVaultName);
-                (string certificateName, string certificateVerison) = await certificateHelper.ImportCertificate(domainName.Replace(".", ""), pfx, password);
+                (string certificateName, string certificateVerison) = await certificateHelper.ImportCertificate(keyVaultCertificateName, pfx, password);
 
                 await cdnHelper.EnableHttpsForCustomDomain(Environment.GetEnvironmentVariable("CdnResourceGroup"), Environment.GetEnvironmentVariable("CdnProfileName"),
                     Environment.GetEnvironmentVariable("CdnEndpointName"), Environment.GetEnvironmentVariable("CdnCustomDomainName"),

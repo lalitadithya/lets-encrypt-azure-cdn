@@ -1,4 +1,5 @@
-﻿using Azure.Identity;
+﻿using Azure;
+using Azure.Identity;
 using Azure.Security.KeyVault.Certificates;
 using System;
 using System.Collections.Generic;
@@ -26,6 +27,25 @@ namespace LetsEncryptAzureCdn.Helpers
             });
 
             return (result.Value.Properties.Name, result.Value.Properties.Version);
+        }
+
+        public async Task<DateTimeOffset?> GetCertificateExpiryAsync(string certificateName)
+        {
+            try
+            {
+                return (await certificateClient.GetCertificateAsync(certificateName)).Value.Properties.ExpiresOn;
+            }
+            catch (RequestFailedException e)
+            {
+                if (e.Status == 404)
+                {
+                    return null;
+                }
+                else
+                {
+                    throw;
+                }
+            }
         }
     }
 }
