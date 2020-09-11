@@ -26,14 +26,14 @@ namespace LetsEncryptAzureCdn
             var acmeAccountPem = await secretHelper.GetSecretAsync("AcmeAccountKeyPem");
             if (string.IsNullOrWhiteSpace(acmeAccountPem))
             {
-                acmeContext = new AcmeContext(WellKnownServers.LetsEncryptStagingV2);
+                acmeContext = new AcmeContext(WellKnownServers.LetsEncryptV2);
                 await acmeContext.NewAccount(Environment.GetEnvironmentVariable("AcmeAccountEmail"), true);
                 var pem = acmeContext.AccountKey.ToPem();
                 await secretHelper.SetSecretAsync("AcmeAccountKeyPem", pem);
             }
             else
             {
-                acmeContext = new AcmeContext(WellKnownServers.LetsEncryptStagingV2, KeyFactory.FromPem(acmeAccountPem));
+                acmeContext = new AcmeContext(WellKnownServers.LetsEncryptV2, KeyFactory.FromPem(acmeAccountPem));
             }
 
             var domainNames = Environment.GetEnvironmentVariable("DomainName").Split(',');
