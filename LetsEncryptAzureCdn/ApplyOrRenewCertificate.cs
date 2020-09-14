@@ -124,7 +124,7 @@ namespace LetsEncryptAzureCdn
                 var certPem = cert.ToPem();
 
                 var pfxBuilder = cert.ToPfx(privateKey);
-                string password = "abcd1234";
+                string password = Guid.NewGuid().ToString();
                 var pfx = pfxBuilder.Build(domainName, password);
 
                 log.LogInformation("Certificate built");
