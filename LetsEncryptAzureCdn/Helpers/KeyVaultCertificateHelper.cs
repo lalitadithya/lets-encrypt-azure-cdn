@@ -16,7 +16,7 @@ namespace LetsEncryptAzureCdn.Helpers
         public KeyVaultCertificateHelper(string keyVaultName)
         {
             keyVaultUri = $"https://{keyVaultName}.vault.azure.net";
-            certificateClient = new CertificateClient(new Uri(keyVaultUri), new VisualStudioCredential());
+            certificateClient = new CertificateClient(new Uri(keyVaultUri), new ManagedIdentityCredential());
         }
 
         public async Task<(string, string)> ImportCertificate(string certificateName, byte[] certificate, string password)

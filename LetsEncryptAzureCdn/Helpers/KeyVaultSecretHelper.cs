@@ -16,7 +16,7 @@ namespace LetsEncryptAzureCdn.Helpers
         public KeyVaultSecretHelper(string keyVaultName)
         {
             keyVaultUri = $"https://{keyVaultName}.vault.azure.net";
-            secretClient = new SecretClient(new Uri(keyVaultUri), new VisualStudioCredential());
+            secretClient = new SecretClient(new Uri(keyVaultUri), new ManagedIdentityCredential());
         }
 
         public async Task<string> GetSecretAsync(string secretName)
