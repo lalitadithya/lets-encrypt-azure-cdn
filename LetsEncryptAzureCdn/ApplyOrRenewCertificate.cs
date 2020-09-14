@@ -30,23 +30,9 @@ namespace LetsEncryptAzureCdn
             {
                 log.LogInformation($"Processing certificate - {certifcate.DomainName}");
                 var acmeHelper = new AcmeHelper(log);
-
-                var secretHelper = new KeyVaultSecretHelper(certifcate.KeyVaultName);
-                var acmeAccountPem = await secretHelper.GetSecretAsync("AcmeAccountKeyPem");
-                if (string.IsNullOrWhiteSpace(acmeAccountPem))
-                {
-                    log.LogInformation("Acme Account not found.");
-                    string pem = await acmeHelper.InitWithNewAccountAsync(Environment.GetEnvironmentVariable("AcmeAccountEmail"));
-                    log.LogInformation("Acme account created");
-                    await secretHelper.SetSecretAsync("AcmeAccountKeyPem", pem);
-                    log.LogInformation("Secret uploaded to key vault");
-                }
-                else
-                {
-                    acmeHelper.InitWithExistingAccount(acmeAccountPem);
-                }
-
                 var certificateHelper = new KeyVaultCertificateHelper(certifcate.KeyVaultName);
+
+                await InitAcme(log, certifcate, acmeHelper);
 
                 string domainName = certifcate.DomainName;
                 if (domainName.StartsWith("*"))
@@ -65,28 +51,13 @@ namespace LetsEncryptAzureCdn
                 }
 
                 log.LogInformation("Creating order for certificates");
+
                 await acmeHelper.CreateOrderAsync(certifcate.DomainName);
                 log.LogInformation("Authorization created");
 
-                var dnsHelper = new DnsHelper(subscriptionId);
-
-                log.LogInformation("Fetching DNS authorization");
-                var dnsText = await acmeHelper.GetDnsAuthorizationTextAsync();
-                var dnsName = ("_acme-challenge." + domainName).Replace("." + certifcate.DnsZoneName, "").Trim();
-                log.LogInformation($"Got DNS challenge {dnsText} for {dnsName}");
-
-                var txtRecords = await dnsHelper.FetchTxtRecordsAsync(certifcate.DnsZoneResourceGroup, certifcate.DnsZoneName, dnsName);
-
-                if (txtRecords == null || !txtRecords.Contains(dnsText))
-                {
-                    await dnsHelper.CreateTxtRecord(certifcate.DnsZoneResourceGroup, certifcate.DnsZoneName, dnsName, dnsText);
-                    log.LogInformation("Created DNS TXT records");
-                }
-
-                log.LogInformation("Waiting 60 seconds for DNS propagation");
-                await Task.Delay(60 * 1000);
-
+                await FetchAndCreateDnsRecords(log, subscriptionId, certifcate, acmeHelper, domainName);
                 log.LogInformation("Validating DNS challenge");
+
                 await acmeHelper.ValidateDnsAuthorizationAsync();
                 log.LogInformation("Challenge validated");
 
@@ -96,15 +67,52 @@ namespace LetsEncryptAzureCdn
                 log.LogInformation("Certificate built");
 
                 (string certificateName, string certificateVerison) = await certificateHelper.ImportCertificate(keyVaultCertificateName, pfx, password);
-
                 log.LogInformation("Certificate imported");
 
                 var cdnHelper = new CdnHelper(subscriptionId);
-
                 await cdnHelper.EnableHttpsForCustomDomain(certifcate.CdnResourceGroup, certifcate.CdnProfileName,
                     certifcate.CdnEndpointName, certifcate.CdnCustomDomainName, certificateName, certificateVerison, certifcate.KeyVaultName);
-
                 log.LogInformation("HTTPS enabling started");
+            }
+        }
+
+        private static async Task FetchAndCreateDnsRecords(ILogger log, string subscriptionId, CertificateRenewalInputModel certifcate, AcmeHelper acmeHelper, string domainName)
+        {
+            var dnsHelper = new DnsHelper(subscriptionId);
+            log.LogInformation("Fetching DNS authorization");
+            var dnsText = await acmeHelper.GetDnsAuthorizationTextAsync();
+            var dnsName = ("_acme-challenge." + domainName).Replace("." + certifcate.DnsZoneName, "").Trim();
+            log.LogInformation($"Got DNS challenge {dnsText} for {dnsName}");
+            await CreateDnsTxtRecordsIfNecessary(log, certifcate, dnsHelper, dnsText, dnsName);
+            log.LogInformation("Waiting 60 seconds for DNS propagation");
+            await Task.Delay(60 * 1000);
+        }
+
+        private static async Task InitAcme(ILogger log, CertificateRenewalInputModel certifcate, AcmeHelper acmeHelper)
+        {
+            var secretHelper = new KeyVaultSecretHelper(certifcate.KeyVaultName);
+            var acmeAccountPem = await secretHelper.GetSecretAsync("AcmeAccountKeyPem");
+            if (string.IsNullOrWhiteSpace(acmeAccountPem))
+            {
+                log.LogInformation("Acme Account not found.");
+                string pem = await acmeHelper.InitWithNewAccountAsync(Environment.GetEnvironmentVariable("AcmeAccountEmail"));
+                log.LogInformation("Acme account created");
+                await secretHelper.SetSecretAsync("AcmeAccountKeyPem", pem);
+                log.LogInformation("Secret uploaded to key vault");
+            }
+            else
+            {
+                acmeHelper.InitWithExistingAccount(acmeAccountPem);
+            }
+        }
+
+        private static async Task CreateDnsTxtRecordsIfNecessary(ILogger log, CertificateRenewalInputModel certifcate, DnsHelper dnsHelper, string dnsText, string dnsName)
+        {
+            var txtRecords = await dnsHelper.FetchTxtRecordsAsync(certifcate.DnsZoneResourceGroup, certifcate.DnsZoneName, dnsName);
+            if (txtRecords == null || !txtRecords.Contains(dnsText))
+            {
+                await dnsHelper.CreateTxtRecord(certifcate.DnsZoneResourceGroup, certifcate.DnsZoneName, dnsName, dnsText);
+                log.LogInformation("Created DNS TXT records");
             }
         }
     }
