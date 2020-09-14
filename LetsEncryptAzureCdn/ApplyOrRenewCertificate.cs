@@ -12,7 +12,7 @@ namespace LetsEncryptAzureCdn
     public static class ApplyOrRenewCertificate
     {
         [FunctionName("ApplyOrRenewCertificate")]
-        public static async Task Run([TimerTrigger("0 */5 * * * *")] TimerInfo myTimer, ILogger log, ExecutionContext executionContext)
+        public static async Task Run([TimerTrigger("0 17 23 * * *")] TimerInfo myTimer, ILogger log, ExecutionContext executionContext)
         {
             log.LogInformation($"C# Timer trigger function executed at: {DateTime.Now}");
 
