@@ -1,9 +1,6 @@
 using System;
 using System.Collections.Generic;
-using System.Linq;
 using System.Threading.Tasks;
-using Certes;
-using Certes.Acme;
 using LetsEncryptAzureCdn.Helpers;
 using LetsEncryptAzureCdn.Models;
 using Microsoft.Azure.WebJobs;
@@ -19,6 +16,7 @@ namespace LetsEncryptAzureCdn
         {
             log.LogInformation($"C# Timer trigger function executed at: {DateTime.Now}");
 
+            string subscriptionId = Environment.GetEnvironmentVariable("SubscriptionId");
             var config = new ConfigurationBuilder()
                                 .SetBasePath(executionContext.FunctionAppDirectory)
                                 .AddJsonFile("local.settings.json", optional: true, reloadOnChange: true)
@@ -31,23 +29,21 @@ namespace LetsEncryptAzureCdn
             foreach (var certifcate in certificateDetails)
             {
                 log.LogInformation($"Processing certificate - {certifcate.DomainName}");
-                AcmeContext acmeContext;
+                var acmeHelper = new AcmeHelper(log);
 
                 var secretHelper = new KeyVaultSecretHelper(certifcate.KeyVaultName);
                 var acmeAccountPem = await secretHelper.GetSecretAsync("AcmeAccountKeyPem");
                 if (string.IsNullOrWhiteSpace(acmeAccountPem))
                 {
                     log.LogInformation("Acme Account not found.");
-                    acmeContext = new AcmeContext(WellKnownServers.LetsEncryptV2);
-                    await acmeContext.NewAccount(Environment.GetEnvironmentVariable("AcmeAccountEmail"), true);
-                    var pem = acmeContext.AccountKey.ToPem();
+                    string pem = await acmeHelper.InitWithNewAccountAsync(Environment.GetEnvironmentVariable("AcmeAccountEmail"));
                     log.LogInformation("Acme account created");
                     await secretHelper.SetSecretAsync("AcmeAccountKeyPem", pem);
                     log.LogInformation("Secret uploaded to key vault");
                 }
                 else
                 {
-                    acmeContext = new AcmeContext(WellKnownServers.LetsEncryptV2, KeyFactory.FromPem(acmeAccountPem));
+                    acmeHelper.InitWithExistingAccount(acmeAccountPem);
                 }
 
                 var certificateHelper = new KeyVaultCertificateHelper(certifcate.KeyVaultName);
@@ -69,17 +65,13 @@ namespace LetsEncryptAzureCdn
                 }
 
                 log.LogInformation("Creating order for certificates");
-                var order = await acmeContext.NewOrder(new string[] { certifcate.DomainName });
-                var authorization = (await order.Authorizations()).First();
+                await acmeHelper.CreateOrderAsync(certifcate.DomainName);
                 log.LogInformation("Authorization created");
-
-                string subscriptionId = Environment.GetEnvironmentVariable("SubscriptionId");
 
                 var dnsHelper = new DnsHelper(subscriptionId);
 
                 log.LogInformation("Fetching DNS authorization");
-                var dnsChallenge = await authorization.Dns();
-                var dnsText = acmeContext.AccountKey.DnsTxt(dnsChallenge.Token);
+                var dnsText = await acmeHelper.GetDnsAuthorizationTextAsync();
                 var dnsName = ("_acme-challenge." + domainName).Replace("." + certifcate.DnsZoneName, "").Trim();
                 log.LogInformation($"Got DNS challenge {dnsText} for {dnsName}");
 
@@ -95,38 +87,12 @@ namespace LetsEncryptAzureCdn
                 await Task.Delay(60 * 1000);
 
                 log.LogInformation("Validating DNS challenge");
-                var challengeResult = await dnsChallenge.Validate();
-                while (challengeResult.Status.HasValue && challengeResult.Status.Value == Certes.Acme.Resource.ChallengeStatus.Pending)
-                {
-                    log.LogInformation("Validation is pending. Will retry in 1 second");
-                    await Task.Delay(1 * 1000);
-                    challengeResult = await dnsChallenge.Resource();
-                }
-
-                if (!challengeResult.Status.HasValue || challengeResult.Status.Value != Certes.Acme.Resource.ChallengeStatus.Valid)
-                {
-                    log.LogError("Unable to validate challenge - {0} - {1}", challengeResult.Error.Detail, string.Join('~', challengeResult.Error.Subproblems.Select(x => x.Detail)));
-                    return;
-                }
-
+                await acmeHelper.ValidateDnsAuthorizationAsync();
                 log.LogInformation("Challenge validated");
 
-                var privateKey = KeyFactory.NewKey(KeyAlgorithm.RS256);
-                var cert = await order.Generate(new CsrInfo
-                {
-                    CountryName = certifcate.CertificateCountryName,
-                    State = certifcate.CertificateState,
-                    Locality = certifcate.CertificateLocality,
-                    Organization = certifcate.CertificateOrganization,
-                    OrganizationUnit = certifcate.CertificateOrganizationUnit,
-                    CommonName = certifcate.DomainName,
-                }, privateKey);
-                var certPem = cert.ToPem();
-
-                var pfxBuilder = cert.ToPfx(privateKey);
                 string password = Guid.NewGuid().ToString();
-                var pfx = pfxBuilder.Build(domainName, password);
-
+                var pfx = await acmeHelper.GetPfxCertificateAsync(password, certifcate.CertificateCountryName, certifcate.CertificateState, certifcate.CertificateLocality,
+                    certifcate.CertificateOrganization, certifcate.CertificateOrganizationUnit, certifcate.DomainName, domainName);
                 log.LogInformation("Certificate built");
 
                 (string certificateName, string certificateVerison) = await certificateHelper.ImportCertificate(keyVaultCertificateName, pfx, password);
