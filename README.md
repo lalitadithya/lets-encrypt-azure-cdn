@@ -19,7 +19,7 @@ This project makes use of an Azure functions app that will add the necessary DNS
 4.	Provider contributor access to your Azure CDN Profile for the Managed Identity created in step 2
 5.	Provide secret and certificate get, update, and list permissions in your Azure Key Vault for the Managed Identity created in step 2
 6.	Add the following configuration to your function app –
-```json
+```
 [
   {
     "name": "AcmeAccountEmail",
